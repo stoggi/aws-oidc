@@ -32,12 +32,13 @@ type Result struct {
 }
 
 type TokenClaims struct {
-	Issuer        string `json:"iss"`
-	Audience      string `json:"aud"`
-	Subject       string `json:"sub"`
-	Picture       string `json:"picture"`
-	Email         string `json:"email"`
-	EmailVerified bool   `json:"email_verified"`
+	Issuer        string   `json:"iss"`
+	Audience      string   `json:"aud"`
+	Subject       string   `json:"sub"`
+	Picture       string   `json:"picture"`
+	Email         string   `json:"email"`
+	EmailVerified bool     `json:"email_verified"`
+	Groups        []string `json:"groups"`
 }
 
 func Authenticate(p *ProviderConfig) (Result, error) {
@@ -68,7 +69,7 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 		ClientSecret: p.ClientSecret,
 		Endpoint:     provider.Endpoint(),
 		RedirectURL:  redirectURL,
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
+		Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "groups"},
 	}
 
 	stateData := make([]byte, 32)
