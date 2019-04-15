@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/stoggi/aws-oidc/provider"
 
@@ -31,6 +33,11 @@ type AwsCredentialHelperData struct {
 	SecretAccessKey string `json:"SecretAccessKey"`
 	SessionToken    string `json:"SessionToken"`
 	Expiration      string `json:"Expiration,omitempty"`
+}
+
+type LambdaPayload struct {
+	Role  string `json:"role"`
+	Token string `json:"token"`
 }
 
 func ConfigureExec(app *kingpin.Application, config *GlobalConfig) {
@@ -98,29 +105,55 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 	authResult, err := provider.Authenticate(providerConfig)
 	app.FatalIfError(err, "Error authenticating to identity provider: %v", err)
 
-	svc := sts.New(session.New())
-	input := &sts.AssumeRoleWithWebIdentityInput{
+	svcSTS := sts.New(session.New())
+	inputSTS := &sts.AssumeRoleWithWebIdentityInput{
 		DurationSeconds:  aws.Int64(execConfig.Duration),
-		RoleArn:          aws.String(execConfig.RoleArn),
+		RoleArn:          aws.String("arn:aws:iam::892845094662:role/onelogin-test-oidc"),
 		RoleSessionName:  aws.String(authResult.Token.Subject),
 		WebIdentityToken: aws.String(authResult.JWT),
 	}
 
-	assumeRoleResult, err := svc.AssumeRoleWithWebIdentity(input)
+	assumeRoleResult, err := svcSTS.AssumeRoleWithWebIdentity(inputSTS)
 	app.FatalIfError(err, "Unable to assume role: %v", err)
 
-	expiry := *assumeRoleResult.Credentials.Expiration
-	credentialData := AwsCredentialHelperData{
-		Version:         1,
-		AccessKeyID:     *assumeRoleResult.Credentials.AccessKeyId,
-		SecretAccessKey: *assumeRoleResult.Credentials.SecretAccessKey,
-		SessionToken:    *assumeRoleResult.Credentials.SessionToken,
-		Expiration:      expiry.Format("2006-01-02T15:04:05Z"),
+	svcLambda := lambda.New(session.New(&aws.Config{
+		Credentials: credentials.NewStaticCredentials(
+			*assumeRoleResult.Credentials.AccessKeyId,
+			*assumeRoleResult.Credentials.SecretAccessKey,
+			*assumeRoleResult.Credentials.SessionToken,
+		),
+		Region: aws.String("us-west-2"),
+	}))
+
+	lambdaPayload := LambdaPayload{
+		Token: authResult.JWT,
+		Role:  execConfig.RoleArn,
+	}
+	lambdaPayloadJSON, err := json.Marshal(&lambdaPayload)
+	if err != nil {
+		app.Fatalf("Error creating lambda payload json")
 	}
 
-	json, err := json.Marshal(&credentialData)
-	if err != nil {
-		app.Fatalf("Error creating credential json")
+	inputLambda := &lambda.InvokeInput{
+		FunctionName:   aws.String("identity-broker"),
+		InvocationType: aws.String("RequestResponse"),
+		Payload:        lambdaPayloadJSON,
 	}
-	fmt.Printf(string(json))
+	result, err := svcLambda.Invoke(inputLambda)
+	if err != nil {
+		app.Fatalf("Error invoking Lambda: " + err.Error())
+	}
+	if *result.FunctionError != "" {
+		app.Fatalf("Remote error: " + string(result.Payload))
+	}
+
+	awsCreds := AwsCredentialHelperData{}
+	if err := json.Unmarshal(result.Payload, &awsCreds); err != nil {
+		app.Fatalf("Error decoding credential json")
+	}
+	output, err := json.Marshal(awsCreds)
+	if err != nil {
+		app.Fatalf("Error encoding credential json")
+	}
+	fmt.Println(string(output))
 }
