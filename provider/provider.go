@@ -56,7 +56,7 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 		return Result{"", nil}, err
 	}
 	// baseURL := "http://" + listener.Addr().String()
-	baseURL := "https://ce76f831.ngrok.io"
+	baseURL := "http://localhost:8080"
 	redirectURL := baseURL + "/auth/callback"
 
 	oidcConfig := &oidc.Config{
