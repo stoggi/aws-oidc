@@ -51,11 +51,12 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 		return Result{"", nil}, err
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:8080")
 	if err != nil {
 		return Result{"", nil}, err
 	}
-	baseURL := "http://" + listener.Addr().String()
+	// baseURL := "http://" + listener.Addr().String()
+	baseURL := "https://ce76f831.ngrok.io"
 	redirectURL := baseURL + "/auth/callback"
 
 	oidcConfig := &oidc.Config{
@@ -69,7 +70,7 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 		ClientSecret: p.ClientSecret,
 		Endpoint:     provider.Endpoint(),
 		RedirectURL:  redirectURL,
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "groups"},
+		Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
 	}
 
 	stateData := make([]byte, 32)

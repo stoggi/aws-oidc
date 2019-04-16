@@ -5,10 +5,8 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/lambda"
-	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/aws/aws-sdk-go/service/cognitoidentity"
 	"github.com/stoggi/aws-oidc/provider"
 
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
@@ -49,7 +47,6 @@ func ConfigureExec(app *kingpin.Application, config *GlobalConfig) {
 	cmd.Default()
 
 	cmd.Flag("role_arn", "The AWS role you want to assume").
-		Required().
 		StringVar(&execConfig.RoleArn)
 
 	cmd.Flag("duration", "The duration to assume the role for in seconds").
@@ -105,53 +102,38 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 	authResult, err := provider.Authenticate(providerConfig)
 	app.FatalIfError(err, "Error authenticating to identity provider: %v", err)
 
-	svcSTS := sts.New(session.New())
-	inputSTS := &sts.AssumeRoleWithWebIdentityInput{
-		DurationSeconds:  aws.Int64(execConfig.Duration),
-		RoleArn:          aws.String("arn:aws:iam::892845094662:role/onelogin-test-oidc"),
-		RoleSessionName:  aws.String(authResult.Token.Subject),
-		WebIdentityToken: aws.String(authResult.JWT),
-	}
-
-	assumeRoleResult, err := svcSTS.AssumeRoleWithWebIdentity(inputSTS)
-	app.FatalIfError(err, "Unable to assume role: %v", err)
-
-	svcLambda := lambda.New(session.New(&aws.Config{
-		Credentials: credentials.NewStaticCredentials(
-			*assumeRoleResult.Credentials.AccessKeyId,
-			*assumeRoleResult.Credentials.SecretAccessKey,
-			*assumeRoleResult.Credentials.SessionToken,
-		),
+	svc := cognitoidentity.New(session.New(&aws.Config{
 		Region: aws.String("us-west-2"),
 	}))
+	inputGetID := &cognitoidentity.GetIdInput{
+		AccountId:      aws.String("892845094662"),
+		IdentityPoolId: aws.String("us-west-2:a6f65a7d-becd-470b-81a8-d3657c2f0d9f"),
+		Logins: map[string]*string{
+			"cognito-idp.us-west-2.amazonaws.com/us-west-2_eBYNmnpS9": aws.String(authResult.JWT),
+		},
+	}
+	getIDResult, err := svc.GetId(inputGetID)
+	app.FatalIfError(err, "Unable to get ID: %v", err)
 
-	lambdaPayload := LambdaPayload{
-		Token: authResult.JWT,
-		Role:  execConfig.RoleArn,
+	inputGetCredentials := &cognitoidentity.GetCredentialsForIdentityInput{
+		IdentityId: getIDResult.IdentityId,
+		Logins: map[string]*string{
+			"cognito-idp.us-west-2.amazonaws.com/us-west-2_eBYNmnpS9": aws.String(authResult.JWT),
+		},
 	}
-	lambdaPayloadJSON, err := json.Marshal(&lambdaPayload)
-	if err != nil {
-		app.Fatalf("Error creating lambda payload json")
+	credentialsResult, err := svc.GetCredentialsForIdentity(inputGetCredentials)
+	app.FatalIfError(err, "Unable to get credentials: %v", err)
+
+	expiry := *credentialsResult.Credentials.Expiration
+	credentialData := AwsCredentialHelperData{
+		Version:         1,
+		AccessKeyID:     *credentialsResult.Credentials.AccessKeyId,
+		SecretAccessKey: *credentialsResult.Credentials.SecretKey,
+		SessionToken:    *credentialsResult.Credentials.SessionToken,
+		Expiration:      expiry.Format("2006-01-02T15:04:05Z"),
 	}
 
-	inputLambda := &lambda.InvokeInput{
-		FunctionName:   aws.String("identity-broker"),
-		InvocationType: aws.String("RequestResponse"),
-		Payload:        lambdaPayloadJSON,
-	}
-	result, err := svcLambda.Invoke(inputLambda)
-	if err != nil {
-		app.Fatalf("Error invoking Lambda: " + err.Error())
-	}
-	if *result.FunctionError != "" {
-		app.Fatalf("Remote error: " + string(result.Payload))
-	}
-
-	awsCreds := AwsCredentialHelperData{}
-	if err := json.Unmarshal(result.Payload, &awsCreds); err != nil {
-		app.Fatalf("Error decoding credential json")
-	}
-	output, err := json.Marshal(awsCreds)
+	output, err := json.Marshal(credentialData)
 	if err != nil {
 		app.Fatalf("Error encoding credential json")
 	}
