@@ -44,3 +44,13 @@ Now you can use the AWS cli as normal, and specify the profile:
         "Account": "892845094662",
         "Arn": "arn:aws:sts::892845094662:assumed-role/onelogin-test-oidc/50904038"
     }
+
+## AWS Cognito
+
+   ./aws-oidc exec \
+   --provider_url=https://cognito-idp.us-west-2.amazonaws.com/us-west-2_eBYNmnpS9 \
+   --client_id=70kdnvprlqf1daspkn0iikdngv \
+   --pkce \
+   --nonce \
+   --no-reauth \
+   -- open -b com.google.chrome -n --args --profile-directory=Default {}
