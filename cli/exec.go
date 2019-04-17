@@ -103,13 +103,13 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 	app.FatalIfError(err, "Error authenticating to identity provider: %v", err)
 
 	svc := cognitoidentity.New(session.New(&aws.Config{
-		Region: aws.String("us-west-2"),
+		Region: aws.String("ap-southeast-2"),
 	}))
 	inputGetID := &cognitoidentity.GetIdInput{
-		AccountId:      aws.String("892845094662"),
-		IdentityPoolId: aws.String("us-west-2:a6f65a7d-becd-470b-81a8-d3657c2f0d9f"),
+		AccountId:      aws.String("811702477007"),
+		IdentityPoolId: aws.String("ap-southeast-2:b0a04ab4-9989-4ee0-b9f7-9b1e56fe0f19"),
 		Logins: map[string]*string{
-			"cognito-idp.us-west-2.amazonaws.com/us-west-2_eBYNmnpS9": aws.String(authResult.JWT),
+			"cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_XloydykNV": aws.String(authResult.JWT),
 		},
 	}
 	getIDResult, err := svc.GetId(inputGetID)
@@ -118,7 +118,7 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 	inputGetCredentials := &cognitoidentity.GetCredentialsForIdentityInput{
 		IdentityId: getIDResult.IdentityId,
 		Logins: map[string]*string{
-			"cognito-idp.us-west-2.amazonaws.com/us-west-2_eBYNmnpS9": aws.String(authResult.JWT),
+			"cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_XloydykNV": aws.String(authResult.JWT),
 		},
 	}
 	credentialsResult, err := svc.GetCredentialsForIdentity(inputGetCredentials)
