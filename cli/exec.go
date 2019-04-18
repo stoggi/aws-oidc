@@ -6,7 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/cognitoidentity"
+	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/stoggi/aws-oidc/provider"
 
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
@@ -47,6 +47,7 @@ func ConfigureExec(app *kingpin.Application, config *GlobalConfig) {
 	cmd.Default()
 
 	cmd.Flag("role_arn", "The AWS role you want to assume").
+		Required().
 		StringVar(&execConfig.RoleArn)
 
 	cmd.Flag("duration", "The duration to assume the role for in seconds").
@@ -102,40 +103,29 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 	authResult, err := provider.Authenticate(providerConfig)
 	app.FatalIfError(err, "Error authenticating to identity provider: %v", err)
 
-	svc := cognitoidentity.New(session.New(&aws.Config{
-		Region: aws.String("ap-southeast-2"),
-	}))
-	inputGetID := &cognitoidentity.GetIdInput{
-		AccountId:      aws.String("811702477007"),
-		IdentityPoolId: aws.String("ap-southeast-2:b0a04ab4-9989-4ee0-b9f7-9b1e56fe0f19"),
-		Logins: map[string]*string{
-			"cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_XloydykNV": aws.String(authResult.JWT),
-		},
+	svc := sts.New(session.New())
+	input := &sts.AssumeRoleWithWebIdentityInput{
+		DurationSeconds:  aws.Int64(execConfig.Duration),
+		RoleArn:          aws.String(execConfig.RoleArn),
+		RoleSessionName:  aws.String(authResult.Claims.Email),
+		WebIdentityToken: aws.String(authResult.JWT),
 	}
-	getIDResult, err := svc.GetId(inputGetID)
-	app.FatalIfError(err, "Unable to get ID: %v", err)
 
-	inputGetCredentials := &cognitoidentity.GetCredentialsForIdentityInput{
-		IdentityId: getIDResult.IdentityId,
-		Logins: map[string]*string{
-			"cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_XloydykNV": aws.String(authResult.JWT),
-		},
-	}
-	credentialsResult, err := svc.GetCredentialsForIdentity(inputGetCredentials)
-	app.FatalIfError(err, "Unable to get credentials: %v", err)
+	assumeRoleResult, err := svc.AssumeRoleWithWebIdentity(input)
+	app.FatalIfError(err, "Unable to assume role: %v", err)
 
-	expiry := *credentialsResult.Credentials.Expiration
+	expiry := *assumeRoleResult.Credentials.Expiration
 	credentialData := AwsCredentialHelperData{
 		Version:         1,
-		AccessKeyID:     *credentialsResult.Credentials.AccessKeyId,
-		SecretAccessKey: *credentialsResult.Credentials.SecretKey,
-		SessionToken:    *credentialsResult.Credentials.SessionToken,
+		AccessKeyID:     *assumeRoleResult.Credentials.AccessKeyId,
+		SecretAccessKey: *assumeRoleResult.Credentials.SecretAccessKey,
+		SessionToken:    *assumeRoleResult.Credentials.SessionToken,
 		Expiration:      expiry.Format("2006-01-02T15:04:05Z"),
 	}
 
-	output, err := json.Marshal(credentialData)
+	json, err := json.Marshal(&credentialData)
 	if err != nil {
-		app.Fatalf("Error encoding credential json")
+		app.Fatalf("Error creating credential json")
 	}
-	fmt.Println(string(output))
+	fmt.Printf(string(json))
 }

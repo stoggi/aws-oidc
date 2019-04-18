@@ -27,8 +27,9 @@ type ProviderConfig struct {
 }
 
 type Result struct {
-	JWT   string
-	Token *oidc.IDToken
+	JWT    string
+	Token  *oidc.IDToken
+	Claims *TokenClaims
 }
 
 type TokenClaims struct {
@@ -48,15 +49,14 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 
 	provider, err := oidc.NewProvider(ctx, p.ProviderURL)
 	if err != nil {
-		return Result{"", nil}, err
+		return Result{"", nil, nil}, err
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:8080")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return Result{"", nil}, err
+		return Result{"", nil, nil}, err
 	}
-	// baseURL := "http://" + listener.Addr().String()
-	baseURL := "http://localhost:8080"
+	baseURL := "http://" + listener.Addr().String()
 	redirectURL := baseURL + "/auth/callback"
 
 	oidcConfig := &oidc.Config{
@@ -75,13 +75,13 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 
 	stateData := make([]byte, 32)
 	if _, err = rand.Read(stateData); err != nil {
-		return Result{"", nil}, err
+		return Result{"", nil, nil}, err
 	}
 	state := base64.URLEncoding.EncodeToString(stateData)
 
 	codeData := make([]byte, 32)
 	if _, err = rand.Read(codeData); err != nil {
-		return Result{"", nil}, err
+		return Result{"", nil, nil}, err
 	}
 	codeVerifier := base64.StdEncoding.EncodeToString(codeData)
 	codeDigest := sha256.Sum256([]byte(codeVerifier))
@@ -156,7 +156,7 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 			return
 		}
 		w.Write([]byte("Signed in successfully, return to cli app"))
-		resultChannel <- Result{rawIDToken, idToken}
+		resultChannel <- Result{rawIDToken, idToken, claims}
 	})
 
 	// Filter the commands, and replace "{}" with our callback url
