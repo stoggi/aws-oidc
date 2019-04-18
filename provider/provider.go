@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"time"
 
 	oidc "github.com/coreos/go-oidc"
 
@@ -42,19 +43,31 @@ type TokenClaims struct {
 	Groups        []string `json:"groups"`
 }
 
-func Authenticate(p *ProviderConfig) (Result, error) {
+type Oauth2Token struct {
+	AccessToken string `json:"access_token"`
+	TokenType string `json:"token_type,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Expiry time.Time `json:"expiry,omitempty"`
+	IDToken string `json:"id_token,omitempty"`
+}
+
+func AuthenticateWithRefreshToken(p *ProviderConfig) {
+
+}
+
+func Authenticate(p *ProviderConfig) (*Oauth2Token, error) {
 	ctx := context.Background()
-	resultChannel := make(chan Result, 0)
+	resultChannel := make(chan *oauth2.Token, 0)
 	errorChannel := make(chan error, 0)
 
 	provider, err := oidc.NewProvider(ctx, p.ProviderURL)
 	if err != nil {
-		return Result{"", nil, nil}, err
+		return nil, err
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return Result{"", nil, nil}, err
+		return nil, err
 	}
 	baseURL := "http://" + listener.Addr().String()
 	redirectURL := baseURL + "/auth/callback"
@@ -75,13 +88,13 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 
 	stateData := make([]byte, 32)
 	if _, err = rand.Read(stateData); err != nil {
-		return Result{"", nil, nil}, err
+		return nil, err
 	}
 	state := base64.URLEncoding.EncodeToString(stateData)
 
 	codeData := make([]byte, 32)
 	if _, err = rand.Read(codeData); err != nil {
-		return Result{"", nil, nil}, err
+		return nil, err
 	}
 	codeVerifier := base64.StdEncoding.EncodeToString(codeData)
 	codeDigest := sha256.Sum256([]byte(codeVerifier))
@@ -156,7 +169,7 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 			return
 		}
 		w.Write([]byte("Signed in successfully, return to cli app"))
-		resultChannel <- Result{rawIDToken, idToken, claims}
+		resultChannel <- oauth2Token
 	})
 
 	// Filter the commands, and replace "{}" with our callback url
@@ -179,9 +192,19 @@ func Authenticate(p *ProviderConfig) (Result, error) {
 	select {
 	case err := <-errorChannel:
 		server.Shutdown(ctx)
-		return Result{}, err
+		return nil, err
 	case res := <-resultChannel:
 		server.Shutdown(ctx)
-		return res, nil
+		idtoken, ok := res.Extra("id_token").(string)
+		if !ok {
+			return nil, errors.New("Can't extract id_token")
+		}
+		return &Oauth2Token{
+			AccessToken:res.AccessToken,
+			RefreshToken:res.RefreshToken,
+			Expiry:res.Expiry,
+			TokenType:res.TokenType,
+			IDToken:idtoken,
+		}, nil
 	}
 }

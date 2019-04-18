@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/99designs/keyring"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/stoggi/aws-oidc/provider"
 
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 type ExecConfig struct {
@@ -22,7 +21,7 @@ type ExecConfig struct {
 	PKCE         bool
 	Nonce        bool
 	ReAuth       bool
-	AgentCommant []string
+	AgentCommand []string
 }
 
 // json metadata for AWS credential process. Ref: https://docs.aws.amazon.com/cli/latest/topic/config-vars.html#sourcing-credentials-from-external-processes
@@ -81,7 +80,7 @@ func ConfigureExec(app *kingpin.Application, config *GlobalConfig) {
 
 	cmd.Arg("agent", "The executable and arguments of the local browser to use").
 		Default("open", "{}").
-		StringsVar(&execConfig.AgentCommant)
+		StringsVar(&execConfig.AgentCommand)
 
 	cmd.Action(func(c *kingpin.ParseContext) error {
 		ExecCommand(app, config, &execConfig)
@@ -98,34 +97,43 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 		PKCE:         execConfig.PKCE,
 		Nonce:        execConfig.Nonce,
 		ReAuth:       execConfig.ReAuth,
-		AgentCommand: execConfig.AgentCommant,
+		AgentCommand: execConfig.AgentCommand,
 	}
 
-	item, err := (*config.Keyring).Get(fmt.Sprintf("jwt-%s", execConfig.ClientID))
+	item, err := (*config.Keyring).Get(execConfig.ClientID)
+
 	if err != keyring.ErrKeyNotFound {
-		jwt := string(item.Data)
-		accessKeyJson, err := assumeRoleWithWebIdentity(execConfig, jwt)
+		oauth2Token := provider.Oauth2Token{}
+		err := json.Unmarshal(item.Data, &oauth2Token)
+		// Maybe fail silently in case oauth2 lib is not backward compatible
+		app.FatalIfError(err, "Error parsing Oauth2 token from token : %v", err)
+
+		accessKeyJson, err := assumeRoleWithWebIdentity(execConfig, &oauth2Token)
 		if err == nil {
 			fmt.Println(accessKeyJson)
 			return
 		}
 	}
 
-	authResult, err := provider.Authenticate(providerConfig)
-	app.FatalIfError(err, "Error authenticating to identity provider: %v", err)
+	oauth2Token, err := provider.Authenticate(providerConfig)
 
-	accessKeyJson, err := assumeRoleWithWebIdentity(execConfig, authResult.JWT)
-	app.FatalIfError(err, "Error assume role with web identity", err)
+	accessKeyJson, err := assumeRoleWithWebIdentity(execConfig, oauth2Token)
+	app.FatalIfError(err, "Error assume role with web identity : %v", err)
+
+	json, err := json.Marshal(&oauth2Token)
+	app.FatalIfError(err, "Can't serialize Oauth2 token : %v", err)
+
 	(*config.Keyring).Set(keyring.Item{
-		Key:	fmt.Sprintf("jwt-%s", execConfig.ClientID),
-		Data:	[]byte(authResult.JWT),
-		Label: fmt.Sprintf("JWT %s",execConfig.RoleArn),
+		Key:	execConfig.ClientID,
+		Data:	json,
+		Label: fmt.Sprintf("Oauth2 token for %s",execConfig.RoleArn),
 		Description:"OIDC JWT",
 	})
 	fmt.Printf(accessKeyJson)
 }
 
-func assumeRoleWithWebIdentity(execConfig *ExecConfig, jwt string) (string, error) {
+
+func assumeRoleWithWebIdentity(execConfig *ExecConfig, oauth2Token *provider.Oauth2Token) (string, error) {
 
 	svc := sts.New(session.New())
 
@@ -133,7 +141,7 @@ func assumeRoleWithWebIdentity(execConfig *ExecConfig, jwt string) (string, erro
 		DurationSeconds:  aws.Int64(execConfig.Duration),
 		RoleArn:          aws.String(execConfig.RoleArn),
 		RoleSessionName:  aws.String("aws-oidc"),
-		WebIdentityToken: aws.String(jwt),
+		WebIdentityToken: aws.String(oauth2Token.IDToken),
 	}
 
 	assumeRoleResult, err := svc.AssumeRoleWithWebIdentity(input)
