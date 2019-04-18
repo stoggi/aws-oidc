@@ -26,9 +26,10 @@ func ConfigureGlobal(app *kingpin.Application, config *GlobalConfig) {
 
 		// Attempt to open the aws-vault keychain
 		keychain, err := keyring.Open(keyring.Config{
-			KeychainName:    "aws-vault",
-			ServiceName:     "aws-vault",
+			KeychainName:    "aws-oidc",
+			ServiceName:     "aws-oidc",
 			AllowedBackends: []keyring.BackendType{keyring.KeychainBackend},
+			KeychainTrustApplication: true,
 		})
 		kingpin.FatalIfError(err, "Could not open aws-vault keychain")
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/99designs/keyring"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -100,19 +101,45 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 		AgentCommand: execConfig.AgentCommant,
 	}
 
+	item, err := (*config.Keyring).Get(fmt.Sprintf("jwt-%s", execConfig.ClientID))
+	if err != keyring.ErrKeyNotFound {
+		jwt := string(item.Data)
+		accessKeyJson, err := assumeRoleWithWebIdentity(execConfig, jwt)
+		if err == nil {
+			fmt.Println(accessKeyJson)
+			return
+		}
+	}
+
 	authResult, err := provider.Authenticate(providerConfig)
 	app.FatalIfError(err, "Error authenticating to identity provider: %v", err)
 
+	accessKeyJson, err := assumeRoleWithWebIdentity(execConfig, authResult.JWT)
+	app.FatalIfError(err, "Error assume role with web identity", err)
+	(*config.Keyring).Set(keyring.Item{
+		Key:	fmt.Sprintf("jwt-%s", execConfig.ClientID),
+		Data:	[]byte(authResult.JWT),
+		Label: fmt.Sprintf("JWT %s",execConfig.RoleArn),
+		Description:"OIDC JWT",
+	})
+	fmt.Printf(accessKeyJson)
+}
+
+func assumeRoleWithWebIdentity(execConfig *ExecConfig, jwt string) (string, error) {
+
 	svc := sts.New(session.New())
+
 	input := &sts.AssumeRoleWithWebIdentityInput{
 		DurationSeconds:  aws.Int64(execConfig.Duration),
 		RoleArn:          aws.String(execConfig.RoleArn),
-		RoleSessionName:  aws.String(authResult.Claims.Email),
-		WebIdentityToken: aws.String(authResult.JWT),
+		RoleSessionName:  aws.String("aws-oidc"),
+		WebIdentityToken: aws.String(jwt),
 	}
 
 	assumeRoleResult, err := svc.AssumeRoleWithWebIdentity(input)
-	app.FatalIfError(err, "Unable to assume role: %v", err)
+	if err != nil {
+		return "", err
+	}
 
 	expiry := *assumeRoleResult.Credentials.Expiration
 	credentialData := AwsCredentialHelperData{
@@ -125,7 +152,8 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 
 	json, err := json.Marshal(&credentialData)
 	if err != nil {
-		app.Fatalf("Error creating credential json")
+		return "", err
 	}
-	fmt.Printf(string(json))
+
+	return string(json), nil
 }
