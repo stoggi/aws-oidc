@@ -3,11 +3,13 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/99designs/keyring"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/stoggi/aws-oidc/provider"
+	"golang.org/x/oauth2"
 
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -90,7 +92,7 @@ func ConfigureExec(app *kingpin.Application, config *GlobalConfig) {
 
 func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *ExecConfig) {
 
-	providerConfig := &provider.ProviderConfig{
+	p := &provider.ProviderConfig{
 		ClientID:     execConfig.ClientID,
 		ClientSecret: execConfig.ClientSecret,
 		ProviderURL:  execConfig.ProviderURL,
@@ -99,41 +101,36 @@ func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *Exe
 		ReAuth:       execConfig.ReAuth,
 		AgentCommand: execConfig.AgentCommand,
 	}
+	oauth2Token := provider.OAuth2Token{}
 
 	item, err := (*config.Keyring).Get(execConfig.ClientID)
-
 	if err != keyring.ErrKeyNotFound {
-		oauth2Token := provider.Oauth2Token{}
-		err := json.Unmarshal(item.Data, &oauth2Token)
-		// Maybe fail silently in case oauth2 lib is not backward compatible
-		app.FatalIfError(err, "Error parsing Oauth2 token from token : %v", err)
-
-		accessKeyJson, err := assumeRoleWithWebIdentity(execConfig, &oauth2Token)
-		if err == nil {
-			fmt.Println(accessKeyJson)
-			return
+		if err := json.Unmarshal(item.Data, &oauth2Token); err != nil {
+			// Log this error only, because we can attempt to recover by getting a new token
+			app.Errorf("Unable to unmarshal OAuth2Token from keychain: %v", err)
 		}
 	}
 
-	oauth2Token, err := provider.Authenticate(providerConfig)
+	err = p.Authenticate(&oauth2Token)
+	app.FatalIfError(err, "Error authenticating with identity provider")
 
-	accessKeyJson, err := assumeRoleWithWebIdentity(execConfig, oauth2Token)
-	app.FatalIfError(err, "Error assume role with web identity : %v", err)
+	AWSCredentialsJSON, err := assumeRoleWithWebIdentity(execConfig, oauth2Token.IDToken)
+	app.FatalIfError(err, "Error assume role with web identity")
 
 	json, err := json.Marshal(&oauth2Token)
-	app.FatalIfError(err, "Can't serialize Oauth2 token : %v", err)
-
-	(*config.Keyring).Set(keyring.Item{
-		Key:	execConfig.ClientID,
-		Data:	json,
-		Label: fmt.Sprintf("Oauth2 token for %s",execConfig.RoleArn),
-		Description:"OIDC JWT",
+	app.FatalIfError(err, "Error marshalling OAuth2 token")
+	err = (*config.Keyring).Set(keyring.Item{
+		Key:         execConfig.ClientID,
+		Data:        json,
+		Label:       fmt.Sprintf("OAuth2 token for %s", execConfig.RoleArn),
+		Description: "OIDC OAuth2 Token",
 	})
-	fmt.Printf(accessKeyJson)
+	app.FatalIfError(err, "Error storing OAuth2 Token in keychain")
+
+	fmt.Printf(AWSCredentialsJSON)
 }
 
-
-func assumeRoleWithWebIdentity(execConfig *ExecConfig, oauth2Token *provider.Oauth2Token) (string, error) {
+func assumeRoleWithWebIdentity(execConfig *ExecConfig, idToken string) (string, error) {
 
 	svc := sts.New(session.New())
 
@@ -141,7 +138,7 @@ func assumeRoleWithWebIdentity(execConfig *ExecConfig, oauth2Token *provider.Oau
 		DurationSeconds:  aws.Int64(execConfig.Duration),
 		RoleArn:          aws.String(execConfig.RoleArn),
 		RoleSessionName:  aws.String("aws-oidc"),
-		WebIdentityToken: aws.String(oauth2Token.IDToken),
+		WebIdentityToken: aws.String(idToken),
 	}
 
 	assumeRoleResult, err := svc.AssumeRoleWithWebIdentity(input)

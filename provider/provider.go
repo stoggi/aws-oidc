@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"os/exec"
@@ -43,32 +44,59 @@ type TokenClaims struct {
 	Groups        []string `json:"groups"`
 }
 
-type Oauth2Token struct {
-	AccessToken string `json:"access_token"`
-	TokenType string `json:"token_type,omitempty"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	Expiry time.Time `json:"expiry,omitempty"`
-	IDToken string `json:"id_token,omitempty"`
+type OAuth2Token struct {
+	AccessToken  string    `json:"access_token"`
+	TokenType    string    `json:"token_type,omitempty"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
+	Expiry       time.Time `json:"expiry,omitempty"`
+	IDToken      string    `json:"id_token,omitempty"`
 }
 
-func AuthenticateWithRefreshToken(p *ProviderConfig) {
+func (t *OAuth2Token) Refresh(config *oauth2.Config) error {
+	ctx := context.Background()
 
+	tokenSourceToken := oauth2.Token{
+		AccessToken:  t.AccessToken,
+		TokenType:    t.TokenType,
+		RefreshToken: t.RefreshToken,
+		Expiry:       t.Expiry,
+	}
+	ts := config.TokenSource(ctx, tokenSourceToken.WithExtra(map[string]interface{}{
+		"id_token": t.IDToken,
+	}))
+
+	res, err := ts.Token()
+	if err != nil {
+		return err
+	}
+	idtoken, ok := res.Extra("id_token").(string)
+	if !ok {
+		return errors.New("Can't extract id_token")
+	}
+	t.AccessToken = res.AccessToken
+	t.RefreshToken = res.RefreshToken
+	t.Expiry = res.Expiry
+	t.TokenType = res.TokenType
+	t.IDToken = idtoken
+
+	return nil
 }
 
-func Authenticate(p *ProviderConfig) (*Oauth2Token, error) {
+func (p *ProviderConfig) Authenticate(t *OAuth2Token) error {
 	ctx := context.Background()
 	resultChannel := make(chan *oauth2.Token, 0)
 	errorChannel := make(chan error, 0)
 
 	provider, err := oidc.NewProvider(ctx, p.ProviderURL)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, err
+		return err
 	}
+	defer listener.Close()
 	baseURL := "http://" + listener.Addr().String()
 	redirectURL := baseURL + "/auth/callback"
 
@@ -86,15 +114,24 @@ func Authenticate(p *ProviderConfig) (*Oauth2Token, error) {
 		Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
 	}
 
+	if t != nil {
+		if err := t.Refresh(&config); err == nil {
+			log.Println("Refreshed token successfully")
+			return nil
+		} else {
+			log.Println(err)
+		}
+	}
+
 	stateData := make([]byte, 32)
 	if _, err = rand.Read(stateData); err != nil {
-		return nil, err
+		return err
 	}
 	state := base64.URLEncoding.EncodeToString(stateData)
 
 	codeData := make([]byte, 32)
 	if _, err = rand.Read(codeData); err != nil {
-		return nil, err
+		return err
 	}
 	codeVerifier := base64.StdEncoding.EncodeToString(codeData)
 	codeDigest := sha256.Sum256([]byte(codeVerifier))
@@ -192,19 +229,18 @@ func Authenticate(p *ProviderConfig) (*Oauth2Token, error) {
 	select {
 	case err := <-errorChannel:
 		server.Shutdown(ctx)
-		return nil, err
+		return err
 	case res := <-resultChannel:
 		server.Shutdown(ctx)
 		idtoken, ok := res.Extra("id_token").(string)
 		if !ok {
-			return nil, errors.New("Can't extract id_token")
+			return errors.New("Can't extract id_token")
 		}
-		return &Oauth2Token{
-			AccessToken:res.AccessToken,
-			RefreshToken:res.RefreshToken,
-			Expiry:res.Expiry,
-			TokenType:res.TokenType,
-			IDToken:idtoken,
-		}, nil
+		t.AccessToken = res.AccessToken
+		t.RefreshToken = res.RefreshToken
+		t.Expiry = res.Expiry
+		t.TokenType = res.TokenType
+		t.IDToken = idtoken
+		return nil
 	}
 }

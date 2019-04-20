@@ -47,10 +47,26 @@ Now you can use the AWS cli as normal, and specify the profile:
 
 ## AWS Cognito
 
-   ./aws-oidc exec \
-   --provider_url=https://cognito-idp.us-west-2.amazonaws.com/us-west-2_eBYNmnpS9 \
-   --client_id=70kdnvprlqf1daspkn0iikdngv \
-   --pkce \
-   --nonce \
-   --no-reauth \
-   -- open -b com.google.chrome -n --args --profile-directory=Default {}
+    ./aws-oidc exec \
+    --provider_url=https://cognito-idp.us-west-2.amazonaws.com/us-west-2_eBYNmnpS9 \
+    --client_id=70kdnvprlqf1daspkn0iikdngv \
+    --pkce \
+    --nonce \
+    --no-reauth \
+    -- open -b com.google.chrome -n --args --profile-directory=Default {}
+
+## Find roles that an oidc client could assume
+
+    aws-vault exec test-privileged-admin -- aws iam list-roles --query <<EOF '
+    Roles[?
+      AssumeRolePolicyDocument.Statement[?
+        Condition.StringEquals."openid-connect.onelogin.com/oidc:aud"
+      ]
+    ].{
+      RoleName:RoleName,
+      Arn:Arn,
+      ClientId:AssumeRolePolicyDocument.Statement[*].Condition.StringEquals."openid-connect.onelogin.com/oidc:aud" | [0]
+    } | [?
+      contains(ClientId, `ef061080-43aa-0137-62f3-066d8813aeb888900`)
+    ]'
+    EOF

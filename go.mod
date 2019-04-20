@@ -13,6 +13,7 @@ require (
 	github.com/go-ini/ini v1.42.0 // indirect
 	github.com/godbus/dbus v4.1.0+incompatible // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
+	github.com/jmespath/go-jmespath v0.0.0-20180206201540-c2b33e8439af
 	github.com/keybase/go-keychain v0.0.0-20190408194155-7f2ef9fddce6 // indirect
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect

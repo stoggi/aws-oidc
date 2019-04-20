@@ -35,12 +35,14 @@ func run(args []string, exit func(int)) {
 		"Assume roles in AWS using an OIDC identity provider",
 	)
 
-	app.Writer(os.Stdout)
 	app.Version(Version)
 	app.Terminate(exit)
+	app.UsageWriter(os.Stdout)
+	app.ErrorWriter(f)
 
 	cli.ConfigureGlobal(app, &config)
 	cli.ConfigureExec(app, &config)
+	cli.ConfigureList(app, &config)
 
 	kingpin.MustParse(app.Parse(args))
 }
