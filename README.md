@@ -68,6 +68,7 @@ Use the `list` command to find roles that your claim and client_id can assume:
     aws-oidc list --claim="openid-connect.onelogin.com/oidc:aud" --client_id="ef061080-43aa-0137-62f3-066d8813aeb888900"
 
 Example using only the AWS CLI:
+
     aws iam list-roles --query <<EOF '
     Roles[?
       AssumeRolePolicyDocument.Statement[?
