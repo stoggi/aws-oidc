@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/iam"
 	jmespath "github.com/jmespath/go-jmespath"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
+// ListConfig stores the parameters needed for a List command
 type ListConfig struct {
 	ClientID string
+	Claim    string
 }
 
+// ConfigureList configures the list command with arguments and flags
 func ConfigureList(app *kingpin.Application, config *GlobalConfig) {
 
 	listConfig := ListConfig{}
@@ -25,15 +27,20 @@ func ConfigureList(app *kingpin.Application, config *GlobalConfig) {
 		Required().
 		StringVar(&listConfig.ClientID)
 
+	cmd.Flag("claim", "The claim used in the IAM policies, prrovider:claim").
+		Required().
+		StringVar(&listConfig.Claim)
+
 	cmd.Action(func(c *kingpin.ParseContext) error {
 		ListCommand(app, config, &listConfig)
 		return nil
 	})
 }
 
+// ListCommand retrieves the list of AWS roles that have trust policues that accept a given client_id
 func ListCommand(app *kingpin.Application, config *GlobalConfig, listConfig *ListConfig) {
 
-	svc := iam.New(session.New())
+	svc := iam.New(config.Session)
 
 	input := &iam.ListRolesInput{}
 	listRoleResult, err := svc.ListRoles(input)
@@ -47,9 +54,13 @@ func ListCommand(app *kingpin.Application, config *GlobalConfig, listConfig *Lis
 		var d interface{}
 		err = json.Unmarshal([]byte(decodedValue), &d)
 		app.FatalIfError(err, "Unable to unmarshall AssumeRolePolicyDocument")
-		v, err := jmespath.Search("contains(Statement[].Condition.StringEquals.\"openid-connect.onelogin.com/oidc:aud\", `abc`)", d)
-		app.FatalIfError(err, "Unable to parse AssumeRolePolicyDocument")
 
-		fmt.Println(v)
+		query := fmt.Sprintf("contains(Statement[].Condition.StringEquals.\"%s\", '%s')", listConfig.Claim, listConfig.ClientID)
+		containsClientID, err := jmespath.Search(query, d)
+		app.FatalIfError(err, "Unable to parse AssumeRolePolicyDocument")
+		if containsClientID.(bool) {
+			fmt.Println(*role.RoleName)
+			fmt.Println(*role.Arn)
+		}
 	}
 }

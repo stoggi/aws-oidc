@@ -3,6 +3,7 @@ module github.com/stoggi/aws-oidc
 require (
 	github.com/99designs/aws-vault v4.5.1+incompatible
 	github.com/99designs/keyring v0.0.0-20190110203331-82da6802f65f
+	github.com/BurntSushi/toml v0.3.1
 	github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc // indirect
 	github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf // indirect
 	github.com/aulanov/go.dbus v0.0.0-20150729231527-25c3068a42a0 // indirect

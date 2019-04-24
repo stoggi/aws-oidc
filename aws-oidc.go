@@ -1,16 +1,17 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 
+	"github.com/BurntSushi/toml"
 	"github.com/stoggi/aws-oidc/cli"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 // Version is provided at compile time
 var Version = "dev"
-var labelText chan string
 
 func main() {
 	run(os.Args[1:], os.Exit)
@@ -23,12 +24,16 @@ func run(args []string, exit func(int)) {
 		log.Fatalf("error opening file: %v", err)
 	}
 	defer f.Close()
-
-	log.SetOutput(f)
-	log.Println("Starting...")
+	wrt := io.MultiWriter(os.Stderr, f)
+	log.SetOutput(wrt)
 
 	// Default configuration, values are overridden by command line options.
 	config := cli.GlobalConfig{}
+	if _, err := toml.DecodeFile(GetConfigFilePath(), &config); err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Error decoding TOML: %v\n", err)
+		}
+	}
 
 	app := kingpin.New(
 		"aws-oidc",
@@ -38,9 +43,10 @@ func run(args []string, exit func(int)) {
 	app.Version(Version)
 	app.Terminate(exit)
 	app.UsageWriter(os.Stdout)
-	app.ErrorWriter(f)
+	app.ErrorWriter(wrt)
 
 	cli.ConfigureGlobal(app, &config)
+	cli.ConfigureAuth(app, &config)
 	cli.ConfigureExec(app, &config)
 	cli.ConfigureList(app, &config)
 

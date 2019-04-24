@@ -20,7 +20,12 @@ func execDir() string {
 	return ""
 }
 
+// GetConfigFilePath returns the path of the configuration file
+func GetConfigFilePath() string {
+	return filepath.Join(homeDir(), ".aws-oidc/config")
+}
+
 // GetLogPath returns the path that should be used to store logs
 func GetLogPath() string {
-	return filepath.Join(homeDir(), "./Library/Logs/aws-oidc.log")
+	return filepath.Join(homeDir(), "Library/Logs/aws-oidc.log")
 }

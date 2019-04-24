@@ -1,164 +1,140 @@
 package cli
 
 import (
-	"encoding/json"
-	"fmt"
-
-	"github.com/99designs/keyring"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/sts"
-	"github.com/stoggi/aws-oidc/provider"
-	"golang.org/x/oauth2"
+	"log"
+	"os"
+	"os/exec"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
+// ExecConfig stores the parameters needed for an exec command
 type ExecConfig struct {
-	RoleArn      string
-	Duration     int64
-	ProviderURL  string
-	ClientID     string
-	ClientSecret string
-	PKCE         bool
-	Nonce        bool
-	ReAuth       bool
-	AgentCommand []string
+	Profile string
+	Command string
+	Args    []string
+	Signals chan os.Signal
 }
 
-// json metadata for AWS credential process. Ref: https://docs.aws.amazon.com/cli/latest/topic/config-vars.html#sourcing-credentials-from-external-processes
-type AwsCredentialHelperData struct {
-	Version         int    `json:"Version"`
-	AccessKeyID     string `json:"AccessKeyId"`
-	SecretAccessKey string `json:"SecretAccessKey"`
-	SessionToken    string `json:"SessionToken"`
-	Expiration      string `json:"Expiration,omitempty"`
-}
-
-type LambdaPayload struct {
-	Role  string `json:"role"`
-	Token string `json:"token"`
-}
-
+// ConfigureExec configures the exec command with arguments and flags
 func ConfigureExec(app *kingpin.Application, config *GlobalConfig) {
 
 	execConfig := ExecConfig{}
 
-	cmd := app.Command("exec", "Execute a command with temporary AWS credentials")
+	cmd := app.Command("exec", "Retrieve temporary credentials and set them as environment variables")
 
-	cmd.Default()
+	cmd.Arg("profile", "Name of the profile").
+		StringVar(&config.Profile)
 
-	cmd.Flag("role_arn", "The AWS role you want to assume").
-		Required().
-		StringVar(&execConfig.RoleArn)
+	cmd.Arg("cmd", "Command to execute").
+		Default(os.Getenv("SHELL")).
+		StringVar(&execConfig.Command)
 
-	cmd.Flag("duration", "The duration to assume the role for in seconds").
-		Default("3600").
-		Int64Var(&execConfig.Duration)
-
-	cmd.Flag("provider_url", "The OpenID Connect Provider URL").
-		Required().
-		StringVar(&execConfig.ProviderURL)
-
-	cmd.Flag("client_id", "The OpenID Connect Client ID").
-		Required().
-		StringVar(&execConfig.ClientID)
-
-	cmd.Flag("client_secret", "The OpenID Connect Client Secret").
-		Default("").
-		StringVar(&execConfig.ClientSecret)
-
-	cmd.Flag("pkce", "Use PKCE in the OIDC code flow").
-		Default("true").
-		BoolVar(&execConfig.PKCE)
-
-	cmd.Flag("nonce", "Require a nonce included and verified in the token").
-		Default("true").
-		BoolVar(&execConfig.Nonce)
-
-	cmd.Flag("reauth", "Require reauthentication by the identity provider").
-		Default("false").
-		BoolVar(&execConfig.ReAuth)
-
-	cmd.Arg("agent", "The executable and arguments of the local browser to use").
-		Default("open", "{}").
-		StringsVar(&execConfig.AgentCommand)
+	cmd.Arg("args", "Command arguments").
+		StringsVar(&execConfig.Args)
 
 	cmd.Action(func(c *kingpin.ParseContext) error {
+		execConfig.Signals = make(chan os.Signal)
 		ExecCommand(app, config, &execConfig)
 		return nil
 	})
 }
 
+// ExecCommand retrieves temporary credentials and sets them as environment variables
 func ExecCommand(app *kingpin.Application, config *GlobalConfig, execConfig *ExecConfig) {
 
-	p := &provider.ProviderConfig{
-		ClientID:     execConfig.ClientID,
-		ClientSecret: execConfig.ClientSecret,
-		ProviderURL:  execConfig.ProviderURL,
-		PKCE:         execConfig.PKCE,
-		Nonce:        execConfig.Nonce,
-		ReAuth:       execConfig.ReAuth,
-		AgentCommand: execConfig.AgentCommand,
+	if os.Getenv("AWS_OIDC") != "" {
+		app.Fatalf("aws-vault sessions should be nested with care, unset $AWS_OIDC to force")
+		return
 	}
-	oauth2Token := provider.OAuth2Token{}
 
-	item, err := (*config.Keyring).Get(execConfig.ClientID)
-	if err != keyring.ErrKeyNotFound {
-		if err := json.Unmarshal(item.Data, &oauth2Token); err != nil {
-			// Log this error only, because we can attempt to recover by getting a new token
-			app.Errorf("Unable to unmarshal OAuth2Token from keychain: %v", err)
+	val, err := config.Session.Config.Credentials.Get()
+	if err != nil {
+		app.Fatalf("Unable to get credentials for profile: %s", config.Profile)
+	}
+
+	env := environ(os.Environ())
+	env.Set("AWS_OIDC", config.Profile)
+
+	env.Unset("AWS_ACCESS_KEY_ID")
+	env.Unset("AWS_SECRET_ACCESS_KEY")
+	env.Unset("AWS_CREDENTIAL_FILE")
+	env.Unset("AWS_DEFAULT_PROFILE")
+	env.Unset("AWS_PROFILE")
+
+	if config.Region != "" {
+		log.Printf("Setting subprocess env: AWS_DEFAULT_REGION=%s, AWS_REGION=%s", config.Region, config.Region)
+		env.Set("AWS_DEFAULT_REGION", config.Region)
+		env.Set("AWS_REGION", config.Region)
+	}
+
+	log.Println("Setting subprocess env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY")
+	env.Set("AWS_ACCESS_KEY_ID", val.AccessKeyID)
+	env.Set("AWS_SECRET_ACCESS_KEY", val.SecretAccessKey)
+
+	if val.SessionToken != "" {
+		log.Println("Setting subprocess env: AWS_SESSION_TOKEN, AWS_SECURITY_TOKEN")
+		env.Set("AWS_SESSION_TOKEN", val.SessionToken)
+		env.Set("AWS_SECURITY_TOKEN", val.SessionToken)
+	}
+
+	cmd := exec.Command(execConfig.Command, execConfig.Args...)
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	signal.Notify(execConfig.Signals, os.Interrupt, os.Kill)
+
+	if err := cmd.Start(); err != nil {
+		app.Fatalf("%v", err)
+	}
+	// wait for the command to finish
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+		close(waitCh)
+	}()
+
+	for {
+		select {
+		case sig := <-execConfig.Signals:
+			if err = cmd.Process.Signal(sig); err != nil {
+				app.Errorf("%v", err)
+				break
+			}
+		case err := <-waitCh:
+			var waitStatus syscall.WaitStatus
+			if exitError, ok := err.(*exec.ExitError); ok {
+				waitStatus = exitError.Sys().(syscall.WaitStatus)
+				os.Exit(waitStatus.ExitStatus())
+			}
+			if err != nil {
+				app.Fatalf("%v", err)
+			}
+			return
 		}
 	}
-
-	err = p.Authenticate(&oauth2Token)
-	app.FatalIfError(err, "Error authenticating with identity provider")
-
-	AWSCredentialsJSON, err := assumeRoleWithWebIdentity(execConfig, oauth2Token.IDToken)
-	app.FatalIfError(err, "Error assume role with web identity")
-
-	json, err := json.Marshal(&oauth2Token)
-	app.FatalIfError(err, "Error marshalling OAuth2 token")
-	err = (*config.Keyring).Set(keyring.Item{
-		Key:         execConfig.ClientID,
-		Data:        json,
-		Label:       fmt.Sprintf("OAuth2 token for %s", execConfig.RoleArn),
-		Description: "OIDC OAuth2 Token",
-	})
-	app.FatalIfError(err, "Error storing OAuth2 Token in keychain")
-
-	fmt.Printf(AWSCredentialsJSON)
 }
 
-func assumeRoleWithWebIdentity(execConfig *ExecConfig, idToken string) (string, error) {
+// environ is a slice of strings representing the environment, in the form "key=value".
+type environ []string
 
-	svc := sts.New(session.New())
-
-	input := &sts.AssumeRoleWithWebIdentityInput{
-		DurationSeconds:  aws.Int64(execConfig.Duration),
-		RoleArn:          aws.String(execConfig.RoleArn),
-		RoleSessionName:  aws.String("aws-oidc"),
-		WebIdentityToken: aws.String(idToken),
+// Unset an environment variable by key
+func (e *environ) Unset(key string) {
+	for i := range *e {
+		if strings.HasPrefix((*e)[i], key+"=") {
+			(*e)[i] = (*e)[len(*e)-1]
+			*e = (*e)[:len(*e)-1]
+			break
+		}
 	}
+}
 
-	assumeRoleResult, err := svc.AssumeRoleWithWebIdentity(input)
-	if err != nil {
-		return "", err
-	}
-
-	expiry := *assumeRoleResult.Credentials.Expiration
-	credentialData := AwsCredentialHelperData{
-		Version:         1,
-		AccessKeyID:     *assumeRoleResult.Credentials.AccessKeyId,
-		SecretAccessKey: *assumeRoleResult.Credentials.SecretAccessKey,
-		SessionToken:    *assumeRoleResult.Credentials.SessionToken,
-		Expiration:      expiry.Format("2006-01-02T15:04:05Z"),
-	}
-
-	json, err := json.Marshal(&credentialData)
-	if err != nil {
-		return "", err
-	}
-
-	return string(json), nil
+// Set adds an environment variable, replacing any existing ones of the same key
+func (e *environ) Set(key, val string) {
+	e.Unset(key)
+	*e = append(*e, key+"="+val)
 }

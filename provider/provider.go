@@ -24,7 +24,6 @@ type ProviderConfig struct {
 	ProviderURL  string
 	PKCE         bool
 	Nonce        bool
-	ReAuth       bool
 	AgentCommand []string
 }
 
@@ -115,12 +114,10 @@ func (p *ProviderConfig) Authenticate(t *OAuth2Token) error {
 	}
 
 	if t != nil {
-		if err := t.Refresh(&config); err == nil {
-			log.Println("Refreshed token successfully")
+		if err := t.Refresh(&config); err != nil {
 			return nil
-		} else {
-			log.Println(err)
 		}
+		log.Println(err)
 	}
 
 	stateData := make([]byte, 32)
@@ -157,10 +154,6 @@ func (p *ProviderConfig) Authenticate(t *OAuth2Token) error {
 
 	if p.Nonce {
 		authCodeOptions = append(authCodeOptions, oauth2.SetAuthURLParam("nonce", nonce))
-	}
-
-	if p.ReAuth {
-		authCodeOptions = append(authCodeOptions, oauth2.SetAuthURLParam("acr_values", "onelogin:nist:level:1:re-auth"))
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -211,12 +204,17 @@ func (p *ProviderConfig) Authenticate(t *OAuth2Token) error {
 
 	// Filter the commands, and replace "{}" with our callback url
 	c := p.AgentCommand[:0]
+	replacedURL := false
 	for _, arg := range p.AgentCommand {
 		if arg == "{}" {
 			c = append(c, baseURL)
+			replacedURL = true
 		} else {
 			c = append(c, arg)
 		}
+	}
+	if !replacedURL {
+		c = append(c, baseURL)
 	}
 	cmd := exec.Command(c[0], c[1:]...)
 	cmd.Run()
