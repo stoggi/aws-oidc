@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	oidc "github.com/coreos/go-oidc"
+	"github.com/coreos/go-oidc"
 
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
