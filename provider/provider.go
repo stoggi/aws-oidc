@@ -114,7 +114,7 @@ func (p ProviderConfig) Authenticate(t *OAuth2Token) error {
 	}
 
 	if t != nil {
-		if err := refresh(config, t); err != nil {
+		if err := refresh(config, t); err == nil {
 			return nil
 		}
 		log.Println(err)
