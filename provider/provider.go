@@ -242,5 +242,8 @@ func (p ProviderConfig) Authenticate(t *OAuth2Token) error {
 		t.TokenType = res.TokenType
 		t.IDToken = IDToken
 		return nil
+	case <-time.After(2 * time.Minute):
+		server.Shutdown(ctx)
+		return errors.New("no oauth2 flow callback received within last 2 minutes, exiting")
 	}
 }
