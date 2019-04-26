@@ -51,7 +51,7 @@ type OAuth2Token struct {
 	IDToken      string    `json:"id_token,omitempty"`
 }
 
-func (t *OAuth2Token) Refresh(config *oauth2.Config) error {
+func refresh(config oauth2.Config, t *OAuth2Token) error {
 	ctx := context.Background()
 
 	tokenSourceToken := oauth2.Token{
@@ -81,7 +81,7 @@ func (t *OAuth2Token) Refresh(config *oauth2.Config) error {
 	return nil
 }
 
-func (p *ProviderConfig) Authenticate(t *OAuth2Token) error {
+func (p ProviderConfig) Authenticate(t *OAuth2Token) error {
 	ctx := context.Background()
 	resultChannel := make(chan *oauth2.Token, 0)
 	errorChannel := make(chan error, 0)
@@ -114,7 +114,7 @@ func (p *ProviderConfig) Authenticate(t *OAuth2Token) error {
 	}
 
 	if t != nil {
-		if err := t.Refresh(&config); err != nil {
+		if err := refresh(config, t); err != nil {
 			return nil
 		}
 		log.Println(err)
