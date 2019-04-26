@@ -216,6 +216,8 @@ func (p ProviderConfig) Authenticate(t *OAuth2Token) error {
 	if !replacedURL {
 		c = append(c, baseURL)
 	}
+
+	//TODO Drop privileges
 	cmd := exec.Command(c[0], c[1:]...)
 	cmd.Run()
 
