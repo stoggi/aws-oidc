@@ -232,7 +232,7 @@ func (p ProviderConfig) Authenticate(t *OAuth2Token) error {
 		return err
 	case res := <-resultChannel:
 		server.Shutdown(ctx)
-		idtoken, ok := res.Extra("id_token").(string)
+		IDToken, ok := res.Extra("id_token").(string)
 		if !ok {
 			return errors.New("Can't extract id_token")
 		}
@@ -240,7 +240,7 @@ func (p ProviderConfig) Authenticate(t *OAuth2Token) error {
 		t.RefreshToken = res.RefreshToken
 		t.Expiry = res.Expiry
 		t.TokenType = res.TokenType
-		t.IDToken = idtoken
+		t.IDToken = IDToken
 		return nil
 	}
 }
