@@ -139,8 +139,8 @@ func (p *ProviderConfig) Authenticate(t *OAuth2Token) error {
 	_, err = rand.Read(nonceData)
 	nonce := base64.URLEncoding.EncodeToString(nonceData)
 
-	authCodeOptions := []oauth2.AuthCodeOption{}
-	tokenCodeOptions := []oauth2.AuthCodeOption{}
+	var authCodeOptions []oauth2.AuthCodeOption
+	var tokenCodeOptions []oauth2.AuthCodeOption
 
 	if p.PKCE {
 		authCodeOptions = append(authCodeOptions,
