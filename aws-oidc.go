@@ -49,6 +49,7 @@ func run(args []string, exit func(int)) {
 	cli.ConfigureAuth(app, &config)
 	cli.ConfigureExec(app, &config)
 	cli.ConfigureList(app, &config)
+	cli.ConfigureLogin(app, &config)
 
 	kingpin.MustParse(app.Parse(args))
 }

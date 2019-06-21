@@ -37,6 +37,14 @@ Most AWS SDK implementations should be able to use the `credential_process` conf
 * aws-cli
 * boto3
 
+## Sign into the AWS Console
+
+Use the `login` command to exchange the temporary credentials with an [AWS Console login URL](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_enable-console-custom-url.html)
+
+    aws-oidc login
+
+![example](docs/aws-oidc-console-login.gif)
+
 ## Open Chrome with a particular profile
 
 Open `chrome://version/` in the Chrome profile you want to open as, and make a note of the last part of the profile path.
