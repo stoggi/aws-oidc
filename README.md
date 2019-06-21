@@ -10,21 +10,23 @@ https://docs.aws.amazon.com/cli/latest/topic/config-vars.html#sourcing-credentia
 
 ## Getting Started
 
-For example, add the following to **~/.aws/config**:
+Add the following to **~/.aws/config**:
 
     [profile default]
+    region = us-east-1
     credential_process = /Users/jeremy/projects/aws-oidc/aws-oidc auth google
 
 And configure aws-oidc by creating **~/.aws-oidc/config** and setting the `role_arn` and `client_id`:
 
-    region = "ap-southeast-2"
+    region = "us-east-1"
 
     [[AuthProvider]]
     name = "google"
-    role_arn = "arn:aws:iam::012345678901:role/role-name"
+    role_arn = "arn:aws:iam::0123456789012:role/your-role-name"
     duration = 900
     provider_url = "https://accounts.google.com"
-    client_id = "430784603061-osbtei3s71l0bj6d8oegto0itefjmiq6.apps.googleusercontent.com"
+    client_id = "YOUR_CLIENT_ID"
+    client_secret = "YOUR_CLIENT_SECRET" # only specify this if your OIDC provider requires it even when using PKCE
     agent = ["open", "-b", "com.google.chrome"]
 
 Then you can assume the role using the AWS cli:
@@ -47,9 +49,9 @@ Use the `login` command to exchange the temporary credentials with an [AWS Conso
 
 ## Open Chrome with a particular profile
 
-Open `chrome://version/` in the Chrome profile you want to open as, and make a note of the last part of the profile path.
+Open `chrome://version/` in the Chrome profile you want to authenticate in, and make a note of the last part of the profile path.
 
-Update the `agent` option with the profile path in your **~/.aws-oidc/config** file:
+Update the `agent` option with the path in your **~/.aws-oidc/config** file:
 
     agent = ["open", "-b", "com.google.chrome", "-n", "--args", "--profile-directory=Profile 1", "{}"]
 
@@ -58,7 +60,7 @@ Update the `agent` option with the profile path in your **~/.aws-oidc/config** f
 Add the profiles for each role you want to assume to **~/.aws/config**. Specify the provider name from the configuration file, and override any default settings:
 
     [profile engineer]
-    credential_process = aws-oidc auth onelogin --role_arn=arn:aws:iam::892845094662:role/onelogin-test-oidc --duration 7200
+    credential_process = aws-oidc auth onelogin --role_arn=arn:aws:iam::0123456789012:role/your-role-name --duration 7200
 
 Make sure each authentication provider exists in **~/.aws-oidc/config**. You can also override any of the configured settings here on the command line.
 
@@ -78,7 +80,7 @@ This will use the profiles defined in **~/.aws/config** to assume the role by ca
 
 Use the `list` command to find roles that your claim and client_id can assume:
 
-    aws-oidc list --claim="accounts.google.com:aud" --client_id="430784603061-osbtei3s71l0bj6d8oegto0itefjmiq6.apps.googleusercontent.com"
+    aws-oidc list --claim="accounts.google.com:aud" --client_id="CLIENT_ID"
 
 Example using only the AWS CLI:
 
@@ -92,7 +94,7 @@ Example using only the AWS CLI:
       Arn:Arn,
       ClientId:AssumeRolePolicyDocument.Statement[*].Condition.StringEquals."accounts.google.com:aud" | [0]
     } | [?
-      contains(ClientId, `430784603061-osbtei3s71l0bj6d8oegto0itefjmiq6.apps.googleusercontent.com`)
+      contains(ClientId, `CLIENT_ID`)
     ]'
     EOF
 
